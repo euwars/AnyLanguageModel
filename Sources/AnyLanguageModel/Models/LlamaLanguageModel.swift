@@ -2,6 +2,7 @@ import Foundation
 #if Llama
     import JSONSchema
     import LlamaSwift
+    import XGrammar
 
     /// Global storage for the current log level threshold.
     /// This is needed because the C callback can't capture Swift context.
@@ -913,6 +914,41 @@ import Foundation
             return "\(header):\n\(schemaJSON)"
         }
 
+        private func jsonSchemaString(for schema: GenerationSchema) throws -> String {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.sortedKeys]
+            let data = try encoder.encode(schema)
+            guard let jsonSchema = String(data: data, encoding: .utf8) else {
+                throw LlamaLanguageModelError.schemaEncodingFailed
+            }
+            return jsonSchema
+        }
+
+        private func tokenizerInfo(
+            for vocab: OpaquePointer,
+            vocabSize: Int,
+            stopTokens: Set<Int>
+        ) throws -> TokenizerInfo {
+            guard vocabSize > 0 else {
+                throw LlamaLanguageModelError.contextInitializationFailed
+            }
+
+            var encodedVocab: [String] = []
+            encodedVocab.reserveCapacity(vocabSize)
+            for tokenId in 0 ..< vocabSize {
+                let token = llama_token(tokenId)
+                encodedVocab.append(tokenToText(vocab: vocab, token: token) ?? "")
+            }
+
+            let stopTokenIDs = stopTokens.map { Int32($0) }
+            return try TokenizerInfo(
+                encodedVocab: encodedVocab,
+                encoding: .byteFallback,
+                stopTokenIDs: stopTokenIDs,
+                addPrefixSpace: false
+            )
+        }
+
         // MARK: - Structured JSON Generation
 
         private func generateStructuredJSON(
@@ -969,8 +1005,26 @@ import Foundation
 
             let vocabSize = Int(llama_vocab_n_tokens(vocab))
             let initialPosition: Int32 = hasEncoder ? 1 : batchPointer.pointee.n_tokens
+            let jsonSchema = try jsonSchemaString(for: schema)
+            let grammar = Grammar(jsonSchema: jsonSchema, formatting: .compact, strictMode: true)
+            let eosToken = Int(llama_vocab_eos(vocab))
+            let eotTokenValue = llama_vocab_eot(vocab)
+            let endOfTurnToken = eotTokenValue != LLAMA_TOKEN_NULL ? Int(eotTokenValue) : eosToken
+            let endTokens: Set<Int> = [eosToken, endOfTurnToken]
 
-            let backend = LlamaTokenBackend(
+            let tokenizerInfo = try tokenizerInfo(
+                for: vocab,
+                vocabSize: vocabSize,
+                stopTokens: endTokens
+            )
+            let matcher = try await grammar.matcher(
+                for: tokenizerInfo,
+                stopTokens: endTokens.map { Int32($0) },
+                terminatesWithoutStopToken: true
+            )
+            var bitmask = Grammar.Matcher.TokenBitmask(vocabSize: vocabSize)
+
+            var backend = LlamaTokenBackend(
                 context: context,
                 vocab: vocab,
                 vocabSize: vocabSize,
@@ -978,11 +1032,28 @@ import Foundation
                 batch: batchPointer,
                 position: initialPosition,
                 maximumTokens: maxTokens,
-                endTokens: [],
+                endTokens: endTokens,
                 tokenToTextFn: { [self] token in self.tokenToText(vocab: vocab, token: llama_token(token)) }
             )
-            var generator = try ConstrainedJSONGenerator(backend: backend, schema: schema)
-            return try await generator.generate()
+
+            var output = ""
+            while backend.remainingTokens > 0 {
+                bitmask.reset()
+                let needsMask = matcher.fillNextTokenBitmask(&bitmask)
+                let token = try backend.sample(using: bitmask, applyMask: needsMask)
+                if backend.endTokens.contains(token) {
+                    break
+                }
+                guard matcher.accept(Int32(token)) else {
+                    throw LlamaLanguageModelError.grammarMismatch
+                }
+                if let tokenText = backend.tokenText(token) {
+                    output += tokenText
+                }
+                try await backend.decode(token)
+                if matcher.isTerminated { break }
+            }
+            return output
         }
 
         private struct LlamaTokenBackend: TokenBackend {
@@ -1106,6 +1177,21 @@ import Foundation
                 if !tokensExcludedFromRepetitionPenalty.contains(Int(llamaToken)) {
                     llama_sampler_accept(sampler, llamaToken)
                 }
+            }
+
+            mutating func sample(using bitmask: Grammar.Matcher.TokenBitmask, applyMask: Bool) throws -> Int {
+                guard let logits = llama_get_logits(context) else {
+                    return eosToken
+                }
+
+                if applyMask {
+                    for tokenIndex in 0 ..< vocabSize where !bitmask.isTokenAllowed(tokenIndex) {
+                        logits[tokenIndex] = -Float.infinity
+                    }
+                }
+
+                let tokenIndex = batch.pointee.n_tokens - 1
+                return Int(llama_sampler_sample(sampler, context, tokenIndex))
             }
 
             mutating func sample(from allowedTokens: Set<Int>) async throws -> Int {
@@ -1539,6 +1625,8 @@ import Foundation
         case insufficientMemory
         case unsupportedFeature
         case encoderOnlyModel
+        case schemaEncodingFailed
+        case grammarMismatch
 
         public var errorDescription: String? {
             switch self {
@@ -1560,6 +1648,10 @@ import Foundation
                 return "This LlamaLanguageModel does not support image segments"
             case .encoderOnlyModel:
                 return "This model is encoder-only (e.g., BERT) and cannot generate text"
+            case .schemaEncodingFailed:
+                return "Failed to encode the JSON schema for structured generation"
+            case .grammarMismatch:
+                return "Grammar constraints could not be satisfied during generation"
             }
         }
     }
