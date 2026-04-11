@@ -1724,12 +1724,9 @@ private func convertToolToOpenAIFormat(_ tool: any Tool) -> OpenAITool {
     // where possible; fallback to minimal type/required map.
     let rawParameters: JSONValue?
 
-    // Handle the case where the schema has a root reference
-    if let resolvedSchema = tool.parameters.withResolvedRoot() {
-        rawParameters = try? JSONValue(resolvedSchema)
-    } else {
-        rawParameters = try? JSONValue(tool.parameters)
-    }
+    // Fully inline all $ref nodes so providers that don't support $defs work correctly
+    let inlined = tool.parameters.fullyInlined()
+    rawParameters = try? JSONValue(inlined)
 
     let fn = OpenAIFunction(
         name: tool.name,
@@ -1922,7 +1919,7 @@ private extension GenerationSchema {
     /// 1. `additionalProperties: false` at the root
     /// 2. All properties (including optional ones) listed in `required`
     func toJSONValueForOpenAIStrictMode() throws -> JSONValue {
-        let resolvedSchema = self.withResolvedRoot() ?? self
+        let resolvedSchema = self.fullyInlined()
 
         let encoder = JSONEncoder()
         encoder.userInfo[GenerationSchema.omitAdditionalPropertiesKey] = false

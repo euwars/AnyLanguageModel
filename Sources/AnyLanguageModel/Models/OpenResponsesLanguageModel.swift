@@ -906,11 +906,7 @@ private struct OpenResponsesTool: Sendable {
 
 private func convertToolToOpenResponsesFormat(_ tool: any Tool) -> OpenResponsesTool {
     let parameters: JSONValue?
-    if let resolved = tool.parameters.withResolvedRoot() {
-        parameters = try? JSONValue(resolved)
-    } else {
-        parameters = try? JSONValue(tool.parameters)
-    }
+    parameters = try? JSONValue(tool.parameters.fullyInlined())
     return OpenResponsesTool(
         name: tool.name,
         description: tool.description,
@@ -1150,7 +1146,7 @@ enum OpenResponsesLanguageModelError: LocalizedError, Sendable {
 
 private extension GenerationSchema {
     func toJSONValueForOpenResponsesStrictMode() throws -> JSONValue {
-        let resolved = withResolvedRoot() ?? self
+        let resolved = fullyInlined()
         let encoder = JSONEncoder()
         encoder.userInfo[GenerationSchema.omitAdditionalPropertiesKey] = false
         let data = try encoder.encode(resolved)

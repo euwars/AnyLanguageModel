@@ -471,7 +471,7 @@
     @available(macOS 26.0, iOS 26.0, watchOS 26.0, tvOS 26.0, visionOS 26.0, *)
     extension FoundationModels.GenerationSchema {
         internal init(_ content: AnyLanguageModel.GenerationSchema) {
-            let resolvedSchema = content.withResolvedRoot() ?? content
+            let resolvedSchema = content.fullyInlined()
 
             // Convert the GenerationSchema into a DynamicGenerationSchema, preserving $defs
             let rawParameters = try? JSONValue(resolvedSchema)
@@ -782,7 +782,7 @@
         for type: Content.Type
     ) -> (content: Content.PartiallyGenerated, rawContent: GeneratedContent)? {
         let schema = type.generationSchema
-        let resolved = schema.withResolvedRoot() ?? schema
+        let resolved = schema.fullyInlined()
         let raw = placeholderGeneratedContent(from: resolved.root, defs: resolved.defs)
 
         if let partial: Content.PartiallyGenerated = try? .init(raw) {
@@ -799,7 +799,7 @@
         for type: Content.Type
     ) -> (content: Content, rawContent: GeneratedContent)? {
         let schema = type.generationSchema
-        let resolved = schema.withResolvedRoot() ?? schema
+        let resolved = schema.fullyInlined()
         let raw = placeholderGeneratedContent(from: resolved.root, defs: resolved.defs)
 
         if let value = try? Content(raw) {

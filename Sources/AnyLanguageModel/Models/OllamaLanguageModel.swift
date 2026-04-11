@@ -424,7 +424,7 @@ private func convertOptions(_ options: GenerationOptions) -> [String: JSONValue]
 }
 
 private func convertToolToOllamaFormat(_ tool: any Tool) throws -> [String: JSONValue] {
-    let resolvedSchema = tool.parameters.withResolvedRoot() ?? tool.parameters
+    let resolvedSchema = tool.parameters.fullyInlined()
     return [
         "type": .string("function"),
         "function": .object([
@@ -436,7 +436,7 @@ private func convertToolToOllamaFormat(_ tool: any Tool) throws -> [String: JSON
 }
 
 private func convertSchemaToOllamaFormat(_ schema: GenerationSchema) throws -> JSONSchema {
-    let resolvedSchema = schema.withResolvedRoot() ?? schema
+    let resolvedSchema = schema.fullyInlined()
     let data = try JSONEncoder().encode(resolvedSchema)
     return try JSONDecoder().decode(JSONSchema.self, from: data)
 }

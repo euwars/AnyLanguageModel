@@ -464,6 +464,44 @@ public struct GenerationSchema: Equatable, Codable, CustomDebugStringConvertible
         return nil
     }
 
+    /// Returns a new schema with all `$ref` nodes recursively replaced by their definitions,
+    /// producing a self-contained schema with no `$defs`/`$ref`.
+    func fullyInlined() -> GenerationSchema {
+        let resolved = withResolvedRoot() ?? self
+        return GenerationSchema(root: resolved.inlineNode(resolved.root), defs: [:])
+    }
+
+    private func inlineNode(_ node: Node) -> Node {
+        switch node {
+        case .ref(let name):
+            if let defNode = defs[name] {
+                return inlineNode(defNode)
+            }
+            return node
+        case .object(let obj):
+            var inlinedProps: [String: Node] = [:]
+            for (key, propNode) in obj.properties {
+                inlinedProps[key] = inlineNode(propNode)
+            }
+            return .object(ObjectNode(
+                description: obj.description,
+                properties: inlinedProps,
+                required: obj.required
+            ))
+        case .array(let arr):
+            return .array(ArrayNode(
+                description: arr.description,
+                items: inlineNode(arr.items),
+                minItems: arr.minItems,
+                maxItems: arr.maxItems
+            ))
+        case .anyOf(let nodes):
+            return .anyOf(nodes.map { inlineNode($0) })
+        case .string, .number, .boolean:
+            return node
+        }
+    }
+
     private static func convertDynamic(
         _ dynamic: DynamicGenerationSchema,
         nameMap: [String: DynamicGenerationSchema],

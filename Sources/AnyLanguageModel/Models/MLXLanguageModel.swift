@@ -1358,7 +1358,7 @@ import Foundation
         // Convert AnyLanguageModel's GenerationSchema to JSON-compatible dictionary
         let parametersDict: [String: any Sendable]
         do {
-            let resolvedSchema = tool.parameters.withResolvedRoot() ?? tool.parameters
+            let resolvedSchema = tool.parameters.fullyInlined()
             let encoder = JSONEncoder()
             let data = try encoder.encode(resolvedSchema)
             if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] {
