@@ -110,7 +110,7 @@ extension Tool where Self.Arguments: Generable {
 // MARK: - Helpers
 
 extension Tool {
-    internal func makeOutputSegments(from arguments: GeneratedContent) async throws -> [Transcript.Segment] {
+    public func makeOutputSegments(from arguments: GeneratedContent) async throws -> [Transcript.Segment] {
         let parsedArguments = try Arguments(arguments)
         let output = try await call(arguments: parsedArguments)
 
