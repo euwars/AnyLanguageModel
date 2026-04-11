@@ -466,7 +466,7 @@ public struct GenerationSchema: Equatable, Codable, CustomDebugStringConvertible
 
     /// Returns a new schema with all `$ref` nodes recursively replaced by their definitions,
     /// producing a self-contained schema with no `$defs`/`$ref`.
-    func fullyInlined() -> GenerationSchema {
+    public func fullyInlined() -> GenerationSchema {
         let resolved = withResolvedRoot() ?? self
         return GenerationSchema(root: resolved.inlineNode(resolved.root), defs: [:])
     }
