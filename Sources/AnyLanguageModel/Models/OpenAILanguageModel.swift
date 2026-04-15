@@ -207,6 +207,10 @@ public struct OpenAILanguageModel: LanguageModel {
         /// allowing you to pass vendor-specific options like `reasoning`
         /// for Grok models via OpenRouter, or any parameters not explicitly
         /// modeled in this type.
+        /// xAI Responses API: previous response ID for conversation chaining.
+        /// When set, only the new message is sent — xAI hydrates full conversation server-side.
+        public var previousResponseId: String?
+
         public var extraBody: [String: JSONValue]?
 
         // MARK: - Nested Types
@@ -392,6 +396,12 @@ public struct OpenAILanguageModel: LanguageModel {
 
     /// The API variant to use.
     public let apiVariant: APIVariant
+
+    /// Last response ID from Responses API — for previous_response_id chaining.
+    private let _lastResponseId = Locked<String?>(nil)
+    public var lastResponseId: String? {
+        _lastResponseId.withLock { $0 }
+    }
 
     private let httpSession: HTTPSession
 
@@ -601,6 +611,9 @@ public struct OpenAILanguageModel: LanguageModel {
                 ],
                 body: body
             )
+
+            // Store response ID for chaining subsequent calls
+            _lastResponseId.withLock { $0 = resp.id }
 
             let toolCalls = extractToolCallsFromOutput(resp.output)
             lastOutput = resp.output
@@ -1217,6 +1230,21 @@ private enum Responses {
 
         // Apply custom options
         if let customOptions = options[custom: OpenAILanguageModel.self] {
+            // xAI Responses API: chain with previous response — only send new input
+            if let prevId = customOptions.previousResponseId {
+                body["previous_response_id"] = .string(prevId)
+                if let inputArray = body["input"], case .array(let items) = inputArray {
+                    if let lastUserMsg = items.last(where: { item in
+                        if case .object(let obj) = item,
+                           case .string(let t) = obj["type"], t == "message" { return true }
+                        return false
+                    }) {
+                        body["input"] = .array([lastUserMsg])
+                    }
+                }
+                body.removeValue(forKey: "instructions")
+            }
+
             // Sampling parameters
             if let topP = customOptions.topP {
                 body["top_p"] = .double(topP)
