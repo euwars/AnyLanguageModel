@@ -211,6 +211,10 @@ public struct OpenAILanguageModel: LanguageModel {
         /// When set, only the new message is sent — xAI hydrates full conversation server-side.
         public var previousResponseId: String?
 
+        /// xAI Responses API: enable Grok's built-in web search tool.
+        /// When true, Grok can search the web and browse pages during generation.
+        public var webSearch: Bool?
+
         public var extraBody: [String: JSONValue]?
 
         // MARK: - Nested Types
@@ -1302,6 +1306,15 @@ private enum Responses {
             // Truncation
             if let truncation = customOptions.truncation {
                 body["truncation"] = .string(truncation.rawValue)
+            }
+
+            // xAI built-in web search tool
+            if customOptions.webSearch == true {
+                let existing: [JSONValue] = {
+                    if case .array(let t) = body["tools"] { return t }
+                    return []
+                }()
+                body["tools"] = .array(existing + [.object(["type": .string("web_search")])])
             }
 
             // Merge extraBody last to allow overrides
